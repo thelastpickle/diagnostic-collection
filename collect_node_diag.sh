@@ -205,10 +205,12 @@ function set_paths {
     mkdir -p $TMP_DIR
 
     # log paths
-    if [ -z "$LOG_DIR" ] && [ -n "$IS_PACKAGE" ]; then
-        LOG_DIR=/var/log/cassandra
-    elif [ -z "$LOG_DIR" ] && [ -n "$IS_TARBALL" ]; then
-        LOG_DIR=$ROOT_DIR/logs
+    if [ -z "$LOG_DIR" ]; then
+        if [ -d "/var/log/cassandra" ]; then
+            LOG_DIR=/var/log/cassandra
+        else
+            LOG_DIR=$ROOT_DIR/logs
+        fi
     fi
 
     # config paths
@@ -267,6 +269,11 @@ function detect_install {
         if [ -z "$ROOT_DIR" ] && [ -d "/etc/cassandra" ] && [ -d "/usr/share/cassandra" ]; then
             IS_PACKAGE="true"
             ROOT_DIR="/etc/cassandra"
+            debug "COSS install: package directories successfully found. Proceeding..."
+        # COSS tarball install
+        elif [ -z "$ROOT_DIR" ] && [ -d "/etc/cassandra" ] && [ -d "/opt/cassandra" ]; then
+            IS_TARBALL="true"
+            ROOT_DIR="/opt/cassandra"
             debug "COSS install: package directories successfully found. Proceeding..."
         # COSS tarball install
         elif [ -d "$ROOT_DIR" ] && [ -d "$ROOT_DIR/conf" ]; then
@@ -418,13 +425,8 @@ function collect_system_info() {
         fi
         cat /sys/kernel/mm/transparent_hugepage/enabled > "$DATA_DIR/os-metrics/hugepage_enabled" 2>&1
         cat /sys/kernel/mm/transparent_hugepage/defrag > "$DATA_DIR/os-metrics/hugepage_defrag" 2>&1
-        if [ -n "$(command -v blockdev)" ]; then
-            if [ -z "$NOSUDO" ]; then
-                sudo blockdev --report 2>&1 |tee > "$DATA_DIR/os-metrics/blockdev_report"
-            fi
-        else
-            echo "Please install 'blockdev' to collect data about devices"
-        fi
+        sudo blockdev --report > "$DATA_DIR/os-metrics/blockdev_report" 2>&1 || blockdev --report > "$DATA_DIR/os-metrics/blockdev_report" 2>&1 || echo "blockdev command not found" |tee > "$DATA_DIR/os-metrics/blockdev_report"
+
         if [ -n "$(command -v dmidecode)" ] && [ -z "$NOSUDO" ]; then
             sudo dmidecode |tee > "$DATA_DIR/os-metrics/dmidecode"
         fi
@@ -701,7 +703,7 @@ function collect_system_info() {
 # Collects data from nodes
 function collect_data {
     echo "Collecting data from node $NODE_ADDR..."
-
+    
     $MAYBE_RUN_WITH_TIMEOUT $BIN_DIR/cqlsh $CQLSH_OPTS -e 'describe cluster;' "$CONN_ADDR" "$CONN_PORT" > /dev/null 2>&1
     RES=$?
     if [ "$RES" -ne 0 ]; then
